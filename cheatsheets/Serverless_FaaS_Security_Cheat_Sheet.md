@@ -131,19 +131,37 @@ def lambda_handler(event, context):
 ### 6. Secrets Management
 
 - Avoid storing secrets in environment variables.
-- Fetch secrets from secure stores (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager).
+- Fetch secrets from vaults using local caching extensions where possible, not env vars.
 - Use ephemeral credentials (STS, workload identity federation).
 - Rotate secrets automatically.
 
-**AWS Lambda Secret Fetch (Python Boto3):**
+**AWS Lambda Secret Fetch (Python via Parameters and Secrets Extension):**
 
 ```python
-import boto3, json
+import os
+import urllib3
+import json
 
 def get_secret(secret_name):
-    client = boto3.client("secretsmanager")
-    response = client.get_secret_value(SecretId=secret_name)
-    return json.loads(response["SecretString"])
+    """
+    Retrieves a secret using the AWS Lambda Extension local endpoint.
+    This method is faster and more cost-effective due to local caching.
+    """
+    # The extension provides a local HTTP endpoint on port 2773
+    secrets_extension_endpoint = (
+        f"http://localhost:2773/secretsmanager/get?secretId={secret_name}"
+    )
+    
+    # Authenticate using the identity token provided by the Lambda environment
+    headers = {"X-Aws-Parameters-Secrets-Token": os.environ.get('AWS_SESSION_TOKEN')}
+    
+    http = urllib3.PoolManager()
+    response = http.request("GET", secrets_extension_endpoint, headers=headers)
+    
+    if response.status != 200:
+        raise Exception(f"Error retrieving secret: {response.data.decode('utf-8')}")
+
+    return json.loads(response.data)["SecretString"]
 ```
 
 ### 7. Monitoring & Logging
